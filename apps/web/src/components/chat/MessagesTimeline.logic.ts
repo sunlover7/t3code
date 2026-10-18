@@ -1,4 +1,5 @@
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
+import { backgroundActivityTrigger } from "@t3tools/client-runtime/user-message";
 export { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import { isLiveSubagentTurnItem } from "@t3tools/client-runtime/state/subagentRuntime";
 import * as DateTime from "effect/DateTime";
@@ -520,6 +521,12 @@ export type MessagesTimelineRow = MessagesTimelineRowContent & {
 
 type MessagesTimelineRowContent =
   | {
+      kind: "background-activity";
+      id: string;
+      createdAt: string;
+      messages: ReadonlyArray<Extract<MessagesTimelineRow, { kind: "message" }>>;
+    }
+  | {
       kind: "worktree-setup";
       id: string;
       createdAt: string | null;
@@ -653,6 +660,36 @@ type MessagesTimelineRowContent =
 export interface StableMessagesTimelineRowsState {
   byId: Map<string, MessagesTimelineRow>;
   result: MessagesTimelineRow[];
+}
+
+/** Group only adjacent mechanical prompts. Never cross an owner message,
+ * assistant outcome, failure, permission request, or tool event. */
+export function groupBackgroundActivityRows(
+  rows: ReadonlyArray<MessagesTimelineRow>,
+): MessagesTimelineRow[] {
+  const result: MessagesTimelineRow[] = [];
+  let messages: Array<Extract<MessagesTimelineRow, { kind: "message" }>> = [];
+  const flush = () => {
+    const first = messages[0];
+    if (!first) return;
+    result.push({
+      kind: "background-activity",
+      id: first.id,
+      createdAt: first.createdAt,
+      messages,
+    });
+    messages = [];
+  };
+  for (const row of rows) {
+    if (row.kind !== "message" || backgroundActivityTrigger(row.message) === null) {
+      flush();
+      result.push(row);
+      continue;
+    }
+    messages.push(row);
+  }
+  flush();
+  return result;
 }
 
 export function computeMessageDurationStart(
@@ -2247,6 +2284,13 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
   if (a.kind !== b.kind || a.id !== b.id) return false;
 
   switch (a.kind) {
+    case "background-activity": {
+      const group = b as typeof a;
+      return (
+        a.messages.length === group.messages.length &&
+        a.messages.every((row, index) => isRowUnchanged(row, group.messages[index]!))
+      );
+    }
     case "working":
       return a.createdAt === (b as typeof a).createdAt;
     case "thinking": {

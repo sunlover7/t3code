@@ -16,7 +16,10 @@ import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
 import { useViewabilityAmount, type LegendListRef } from "@legendapp/list/react-native";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { HandoffEndpoints } from "@t3tools/client-runtime/handoff";
-import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
+import {
+  backgroundActivityTrigger,
+  resolveUserMessagePresentation,
+} from "@t3tools/client-runtime/user-message";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
 import {
   type OrchestrationMessageContext,
@@ -1174,6 +1177,23 @@ function renderFeedEntry(
       !message.streaming;
 
     if (isUser) {
+      const backgroundTrigger = backgroundActivityTrigger(message);
+      if (backgroundTrigger !== null && !props.expandedWorkRows[entry.id]) {
+        return (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Background activity: ${backgroundTrigger}`}
+            accessibilityState={{ expanded: false }}
+            onPress={() => props.onToggleWorkRow(entry.id)}
+            className="mb-3 rounded-xl border border-border px-3 py-2"
+          >
+            <Text className="text-sm text-foreground-muted">Background activity · 1 event</Text>
+            <Text className="text-xs text-foreground-muted">
+              {backgroundTrigger} · {timestampLabel}
+            </Text>
+          </Pressable>
+        );
+      }
       const enterAnimated = isFreshTimestamp(message.createdAt);
       const intentBadge = resolveUserMessageIntentBadge(message.inputIntent);
       const referenceIds = new Set(
@@ -1194,6 +1214,22 @@ function renderFeedEntry(
           className="mb-5 items-end"
           {...(enterAnimated ? { entering: FadeInUp.duration(220) } : {})}
         >
+          {backgroundTrigger !== null ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Collapse background activity"
+              accessibilityState={{ expanded: true }}
+              onPress={() => props.onToggleWorkRow(entry.id)}
+              className="mb-2 px-2 py-1"
+            >
+              <Text className="text-xs text-foreground-muted">
+                {backgroundTrigger} · Hide details
+              </Text>
+              <Text selectable className="text-xs text-foreground-muted">
+                {message.id}
+              </Text>
+            </Pressable>
+          ) : null}
           {presentation.attribution === "automation" ? (
             <Text className="mb-1 pr-1 font-t3-medium text-2xs text-foreground-muted opacity-60">
               Sent by automation

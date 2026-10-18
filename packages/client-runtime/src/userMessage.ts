@@ -49,11 +49,24 @@ export function resolveUserMessagePresentation(message: {
     text: message.text,
     // Restart continuations were sent as the agent before they became notices.
     attribution:
-      message.createdBy !== "agent"
-        ? null
-        : message.creationSource === "server"
-          ? "t3code"
-          : "agent",
+      message.creationSource === "server"
+        ? "t3code"
+        : message.createdBy === "agent"
+          ? "agent"
+          : null,
     scheduledTaskId: undefined,
   };
+}
+
+/** Only known mechanical triggers fold. An agent request or server-origin
+ * failure/decision must remain visible; prompt wording cannot opt into folding. */
+export function backgroundActivityTrigger(
+  message: Parameters<typeof resolveUserMessagePresentation>[0],
+): "Scheduled task" | "Quota reset continuation" | null {
+  if (message.role !== "user") return null;
+  const presentation = resolveUserMessagePresentation(message);
+  if (presentation.scheduledTaskId !== undefined) return "Scheduled task";
+  if (message.creationSource === "server" && message.id?.startsWith("limit-resume:"))
+    return "Quota reset continuation";
+  return null;
 }

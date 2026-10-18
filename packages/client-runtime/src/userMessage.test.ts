@@ -1,7 +1,7 @@
 import { ScheduledTaskId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { resolveUserMessagePresentation } from "./userMessage.ts";
+import { backgroundActivityTrigger, resolveUserMessagePresentation } from "./userMessage.ts";
 
 describe("resolveUserMessagePresentation", () => {
   const legacyText = "[Triggered by schedule task: Daily audit]\n\nCheck for crashes.\n";
@@ -87,5 +87,70 @@ describe("resolveUserMessagePresentation", () => {
         scheduledTaskId: "task:daily-audit",
       });
     }
+  });
+
+  it("labels server-generated user-role continuations without attributing them to the human", () => {
+    expect(
+      resolveUserMessagePresentation({
+        role: "user",
+        createdBy: "user",
+        creationSource: "server",
+        text: "Continue where you left off.",
+      }).attribution,
+    ).toBe("t3code");
+  });
+
+  it("folds only known mechanical triggers, never a human imitation or agent request", () => {
+    const quota = {
+      role: "user",
+      id: "limit-resume:thread:run:reset",
+      text: "Continue where you left off.",
+    };
+    expect(backgroundActivityTrigger({ ...quota, creationSource: "server" })).toBe(
+      "Quota reset continuation",
+    );
+    for (const creationSource of ["web", "mobile", "mcp", "provider"] as const) {
+      expect(backgroundActivityTrigger({ ...quota, creationSource })).toBeNull();
+    }
+    expect(
+      backgroundActivityTrigger({
+        role: "user",
+        text: "Cont",
+        createdBy: "user",
+        creationSource: "mobile",
+      }),
+    ).toBeNull();
+    expect(
+      backgroundActivityTrigger({
+        role: "user",
+        text: "Approval needed",
+        createdBy: "agent",
+        creationSource: "mcp",
+      }),
+    ).toBeNull();
+    expect(
+      backgroundActivityTrigger({
+        role: "user",
+        text: "Failure needs attention",
+        creationSource: "server",
+      }),
+    ).toBeNull();
+    expect(
+      backgroundActivityTrigger({ role: "assistant", text: "Pending.", createdBy: "agent" }),
+    ).toBeNull();
+    expect(
+      backgroundActivityTrigger({
+        role: "user",
+        text: "Run audit",
+        scheduledTaskId: ScheduledTaskId.make("audit"),
+      }),
+    ).toBe("Scheduled task");
+    expect(
+      backgroundActivityTrigger({
+        role: "assistant",
+        text: "Do not hide",
+        scheduledTaskId: ScheduledTaskId.make("audit"),
+      }),
+    ).toBeNull();
   });
 });

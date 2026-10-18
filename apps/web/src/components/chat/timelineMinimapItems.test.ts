@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
-import { MessageId } from "@t3tools/contracts";
+import { MessageId, ScheduledTaskId } from "@t3tools/contracts";
+import { groupBackgroundActivityRows } from "./MessagesTimeline.logic";
 import type { MessagesTimelineRow } from "./MessagesTimeline.logic";
 import { deriveTimelineMinimapItems, resolveTimelineMinimapPreview } from "./timelineMinimapItems";
 import type { ChatMessage } from "../../types";
@@ -29,6 +30,26 @@ function rows(
 }
 
 describe("timeline minimap previews", () => {
+  it("retains background jump targets without assigning their outcomes to the preceding human turn", () => {
+    const source = rows([
+      ["user", "Human request"],
+      ["user", "Automated prompt"],
+      ["assistant", "Automated outcome"],
+    ]);
+    const automated = source[1];
+    if (automated?.kind !== "message") throw new Error("missing prompt");
+    source[1] = {
+      ...automated,
+      message: { ...automated.message, scheduledTaskId: ScheduledTaskId.make("task") },
+    };
+    const grouped = groupBackgroundActivityRows(source);
+    const items = deriveTimelineMinimapItems(grouped);
+    expect(items).toHaveLength(2);
+    expect(items[0]?.assistantText).toBeNull();
+    expect(items[1]?.assistantText).toBe("Automated outcome");
+    expect(grouped[items[1]!.rowIndex]?.id).toBe(items[1]?.id);
+    expect(items[1]?.userText).toBe("Automated prompt");
+  });
   it("previews the last assistant response before the next prompt and retains jump targets", () => {
     const source = rows([
       ["user", "  Inspect\n this  "],

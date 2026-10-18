@@ -36,7 +36,10 @@ import {
 import { parseScopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useAtomValue } from "@effect/atom-react";
 import { environmentThreadDetails } from "../../state/threads";
-import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
+import {
+  backgroundActivityTrigger,
+  resolveUserMessagePresentation,
+} from "@t3tools/client-runtime/user-message";
 import { Link } from "@tanstack/react-router";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
 import { notificationChildThreadId } from "@t3tools/client-runtime/state/thread-execution";
@@ -186,6 +189,7 @@ import {
   timelineContentOverflowsViewport,
 } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { BackgroundActivityDisclosure } from "./BackgroundActivityDisclosure";
 import { promptLinkFor } from "../promptLinks/copyPromptLink";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { WorkspaceEntryIcon, WorkspaceEntryTooltip } from "./WorkspaceEntryIcon";
@@ -199,6 +203,7 @@ import {
 import { useAssistantCitationTarget, type CitationHistoryPage } from "./useAssistantCitationTarget";
 import {
   computeStableMessagesTimelineRows,
+  groupBackgroundActivityRows,
   deriveMessagesTimelineRowsWithState,
   type MessagesTimelineRowsProjection,
   liveWorkEntryLabel,
@@ -948,7 +953,13 @@ const ConversationTimeline = memo(function ConversationTimeline({
     supportsConversationRollback,
     worktreeSetup,
   ]);
-  const rows = useStableRows(rawRows, listIdentityKey);
+  // Search uses the original rows so matches inside a folded prompt can be
+  // revealed and navigated without changing history or message identities.
+  const backgroundRows = useMemo(
+    () => (findActive ? rawRows : groupBackgroundActivityRows(rawRows)),
+    [findActive, rawRows],
+  );
+  const rows = useStableRows(backgroundRows, listIdentityKey);
   // Run status/timestamps churn on every stream event; the shared row context
   // must not change with them or every timeline row re-renders per event.
   const runs = useStableHandoffRuns(runsProp);
@@ -2186,6 +2197,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "turn-fold" ? <TurnFoldTimelineRow row={row} /> : null}
       {row.kind === "attempt-fold" ? <AttemptFoldTimelineRow row={row} /> : null}
       {row.kind === "context-compaction" ? <ContextCompactionTimelineRow row={row} /> : null}
+      {row.kind === "background-activity" ? <BackgroundActivityTimelineRow row={row} /> : null}
       {row.kind === "message" && row.message.role === "user" ? <UserTimelineRow row={row} /> : null}
       {row.kind === "message" && row.message.role === "assistant" ? (
         <AssistantTimelineRow row={row} />
@@ -2308,6 +2320,34 @@ function UserVideoAttachment({ file }: { readonly file: ChatFileAttachment }) {
 // inside a message are exposed below this level. Visually hidden and excluded
 // from selection so sighted users and copied text are unaffected.
 const MESSAGE_HEADING_LEVEL = 3;
+
+function BackgroundActivityTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: "background-activity" }>;
+}) {
+  const ctx = use(TimelineRowCtx);
+  return (
+    <BackgroundActivityDisclosure eventCount={row.messages.length}>
+      {row.messages.map((messageRow) => (
+        <div key={messageRow.id}>
+          <div className="mb-1 flex flex-wrap items-center gap-2 text-xs">
+            <span>{backgroundActivityTrigger(messageRow.message)}</span>
+            <TimelineRowTimestamp
+              createdAt={messageRow.createdAt}
+              timestampFormat={ctx.timestampFormat}
+            />
+            <code className="break-all">{messageRow.message.id}</code>
+            {messageRow.message.runId ? (
+              <code className="break-all">{messageRow.message.runId}</code>
+            ) : null}
+          </div>
+          <UserTimelineRow row={messageRow} />
+        </div>
+      ))}
+    </BackgroundActivityDisclosure>
+  );
+}
 
 function MessageAuthorHeading({ children }: { children: string }) {
   return <h3 className="sr-only select-none">{children}</h3>;
@@ -2527,7 +2567,15 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         <UserMessageIntentMarker intent={row.message.inputIntent} />
       ) : null}
       <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
-        <MessageAuthorHeading>You</MessageAuthorHeading>
+        <MessageAuthorHeading>
+          {userMessage.attribution === null
+            ? "You"
+            : userMessage.attribution === "agent"
+              ? "Another agent"
+              : userMessage.attribution === "automation"
+                ? "Automation"
+                : "T3 Code"}
+        </MessageAuthorHeading>
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[210px] grid-cols-2 gap-2">
             {regularImages.map((image) => (
